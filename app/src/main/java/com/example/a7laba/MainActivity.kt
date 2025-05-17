@@ -18,7 +18,13 @@ import com.yandex.mapkit.mapview.MapView
 class MainActivity : AppCompatActivity() {
     private lateinit var mapView: MapView
     private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private val LOCATION_PERMISSION_REQUEST_CODE = 100
+
+    companion object {
+        private const val LOCATION_PERMISSION_REQUEST_CODE = 100
+        private const val POSTOMAT_LOCATION_LAT = 55.354993
+        private const val POSTOMAT_LOCATION_LON = 86.085805
+        private const val DEFAULT_ZOOM = 15.0f
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,39 +35,70 @@ class MainActivity : AppCompatActivity() {
         mapView = findViewById(R.id.mapView)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
+        setupButtons()
 
+        checkLocationPermissionWithRationale()
+    }
+
+    private fun setupButtons() {
         findViewById<Button>(R.id.btnZoomToKemerovo).apply {
-            text = "Почтамат"
+            text = "Почтомат"
             setOnClickListener {
-                val cameraPosition = CameraPosition(
-                    Point(55.354993, 86.085805),
-                    15.0f,
-                    0.0f,
-                    0.0f
+                moveCameraToLocation(
+                    Point(POSTOMAT_LOCATION_LAT, POSTOMAT_LOCATION_LON),
+                    DEFAULT_ZOOM
                 )
-                mapView.map.move(cameraPosition)
             }
         }
 
         findViewById<Button>(R.id.btnZoomToCurrentLocation).setOnClickListener {
-            checkLocationPermission()
+            checkLocationPermissionWithRationale()
         }
     }
 
-    private fun checkLocationPermission() {
-        if (ContextCompat.checkSelfPermission(
+    private fun moveCameraToLocation(point: Point, zoom: Float) {
+        val cameraPosition = CameraPosition(point, zoom, 0.0f, 0.0f)
+        mapView.map.move(cameraPosition)
+    }
+
+    private fun checkLocationPermissionWithRationale() {
+        when {
+            ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            getCurrentLocation()
-        } else {
-            ActivityCompat.requestPermissions(
+            ) == PackageManager.PERMISSION_GRANTED -> {
+                getCurrentLocation()
+            }
+
+            ActivityCompat.shouldShowRequestPermissionRationale(
                 this,
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                LOCATION_PERMISSION_REQUEST_CODE
-            )
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) -> {
+                showPermissionExplanation()
+            }
+
+            else -> {
+                requestLocationPermission()
+            }
         }
+    }
+
+    private fun showPermissionExplanation() {
+        Toast.makeText(
+            this,
+            "Приложение запрашивает доступ к вашему местоположению для отображения на карте. Разрешение можно изменить в настройках устройства.",
+            Toast.LENGTH_LONG
+        ).show()
+
+        requestLocationPermission()
+    }
+
+    private fun requestLocationPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            LOCATION_PERMISSION_REQUEST_CODE
+        )
     }
 
     private fun getCurrentLocation() {
@@ -70,24 +107,27 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
         ) {
-            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                location?.let {
-                    val cameraPosition = CameraPosition(
-                        Point(it.latitude, it.longitude),
-                        15.0f,
-                        0.0f,
-                        0.0f
-                    )
-                    mapView.map.move(cameraPosition)
-                } ?: run {
-                    Toast.makeText(
-                        this,
-                        "Не удалось получить местоположение",
-                        Toast.LENGTH_SHORT
-                    ).show()
+            fusedLocationClient.lastLocation
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        moveCameraToLocation(
+                            Point(location.latitude, location.longitude),
+                            DEFAULT_ZOOM
+                        )
+                    } else {
+                        showLocationError("Не удалось определить ваше местоположение")
+                    }
                 }
-            }
+                .addOnFailureListener { e ->
+                    showLocationError("Ошибка получения местоположения: ${e.localizedMessage}")
+                }
+        } else {
+            showLocationError("Нет разрешения на доступ к местоположению")
         }
+    }
+
+    private fun showLocationError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     override fun onRequestPermissionsResult(
@@ -96,23 +136,25 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                getCurrentLocation()
-            } else {
-                Toast.makeText(
-                    this,
-                    "Для работы функции необходимо разрешение",
-                    Toast.LENGTH_SHORT
-                ).show()
+        when (requestCode) {
+            LOCATION_PERMISSION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    getCurrentLocation()
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Без разрешения на доступ к местоположению функция недоступна",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
     }
 
     override fun onStart() {
         super.onStart()
-        mapView.onStart()
         MapKitFactory.getInstance().onStart()
+        mapView.onStart()
     }
 
     override fun onStop() {
